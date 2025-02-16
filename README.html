@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JD Boundary Uploader</title>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 20px; }
+    h1, h2 { color: #333; }
+    ul, ol { margin-left: 20px; }
+    code { background: #f4f4f4; padding: 2px 4px; }
+  </style>
+</head>
+<body>
+  <h1>JD Boundary Uploader</h1>
+  <p>
+    JD Boundary Uploader is a QGIS plugin designed to streamline importing and preparing boundary shapefiles for the John Deere Operations Center.
+    It automatically extracts and reprojects shapefiles from FADQ ZIP archives, provides an interactive interface to update attributes (Client, Farm, Field),
+    and supports grouping and merging of fields. Finally, it generates a packaged ZIP archive containing the shapefile and a metadata JSON file compliant with JD requirements.
+  </p>
+  
+  <h2>Features</h2>
+  <ul>
+    <li><strong>Automated Extraction &amp; Reprojection:</strong> Import shapefiles from ZIP archives and reproject them to WGS84.</li>
+    <li><strong>Interactive Editing:</strong> Easily update attributes such as Client Name, Farm Name, and Field Name.</li>
+    <li><strong>Grouping &amp; Merging:</strong> Group and merge fields for streamlined data management.</li>
+    <li><strong>Export Package:</strong> Generate a ZIP archive containing the shapefile and a metadata JSON file ready for upload.</li>
+  </ul>
+  
+  <h2>Installation</h2>
+  <ol>
+    <li>Clone or download this repository.</li>
+    <li>Copy the <code>jd_boundary_uploader</code> folder to your QGIS plugins directory.</li>
+    <li>Restart QGIS and enable the plugin via the Plugin Manager.</li>
+  </ol>
+  
+  <h2>Usage</h2>
+  <ol>
+    <li>Launch the plugin from the toolbar.</li>
+    <li>Select a FADQ ZIP file containing the boundary shapefile.</li>
+    <li>Edit attributes as needed using the interactive interface.</li>
+    <li>Use grouping and merging functions if required.</li>
+    <li>Export the final ZIP archive, including the shapefile and metadata JSON file, ready for the John Deere Operations Center.</li>
+  </ol>
+  
+  <h2>Contributing</h2>
+  <p>
+    Contributions, bug reports, and feature requests are welcome. Please open an issue or submit a pull request on GitHub.
+  </p>
+  
+  <h2>License</h2>
+  <p>
+    This project is licensed under the GNU General Public License (GPL).
+  </p>
+</body>
+</html>
