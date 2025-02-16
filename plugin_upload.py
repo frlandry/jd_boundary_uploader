@@ -1,8 +1,25 @@
 #!/usr/bin/env python
-# coding=utf-8
-"""This script uploads a plugin package to the plugin repository.
-        Authors: A. Pasotti, V. Picavet
-        git sha              : $TemplateVCSFormat
+# -*- coding: utf-8 -*-
+"""
+/***************************************************************************
+ Plugin Upload Script
+                              A QGIS Plugin Utility
+                              -------------------------
+ Description:
+    This script uploads a QGIS plugin package (ZIP file) to the official QGIS
+    Plugin Repository. It uses XML-RPC to communicate with the repository server
+    and requires valid user credentials.
+
+ Usage:
+    Run this script with the plugin ZIP file as an argument. Options include
+    specifying the username, password, server, and port.
+    
+ Author: A. Pasotti, V. Picavet (Template Authors)
+ Modified by: Frederic Landry (frlandry@gmail.com)
+ Date: 2025-02-15
+ License: GNU General Public License (GPL v2 or later)
+***************************************************************************/
+
 """
 
 import sys
@@ -10,21 +27,29 @@ import getpass
 import xmlrpc.client
 from optparse import OptionParser
 
+# Import standard library aliases (if needed)
+from future import standard_library
 standard_library.install_aliases()
 
-# Configuration
+# -----------------------------------------------------------------------------
+# Global Configuration Variables
+# -----------------------------------------------------------------------------
 PROTOCOL = 'https'
 SERVER = 'plugins.qgis.org'
 PORT = '443'
 ENDPOINT = '/plugins/RPC2/'
 VERBOSE = False
 
-
+# -----------------------------------------------------------------------------
+# FUNCTION: main
+# -----------------------------------------------------------------------------
 def main(parameters, arguments):
-    """Main entry point.
-
-    :param parameters: Command line parameters.
-    :param arguments: Command line arguments.
+    """
+    Main entry point for uploading the plugin package.
+    
+    Parameters:
+        parameters: Command line parameters containing username, password, etc.
+        arguments: Command line arguments; expects a single argument for the plugin ZIP file.
     """
     address = "{protocol}://{username}:{password}@{server}:{port}{endpoint}".format(
         protocol=PROTOCOL,
@@ -35,10 +60,12 @@ def main(parameters, arguments):
         endpoint=ENDPOINT)
     print("Connecting to: %s" % hide_password(address))
 
+    # Create an XML-RPC server proxy for communication
     server = xmlrpc.client.ServerProxy(address, verbose=VERBOSE)
 
     try:
         with open(arguments[0], 'rb') as handle:
+            # Upload the plugin package as a binary file
             plugin_id, version_id = server.plugin.upload(
                 xmlrpc.client.Binary(handle.read()))
         print("Plugin ID: %s" % plugin_id)
@@ -54,15 +81,19 @@ def main(parameters, arguments):
         print("Fault code: %d" % err.faultCode)
         print("Fault string: %s" % err.faultString)
 
-
+# -----------------------------------------------------------------------------
+# FUNCTION: hide_password
+# -----------------------------------------------------------------------------
 def hide_password(url, start=6):
-    """Returns the http url with password part replaced with '*'.
-
-    :param url: URL to upload the plugin to.
-    :type url: str
-
-    :param start: Position of start of password.
-    :type start: int
+    """
+    Masks the password portion in a URL with asterisks.
+    
+    Parameters:
+        url (str): The URL containing the username and password.
+        start (int): The starting index for masking (default is 6).
+    
+    Returns:
+        str: The URL with the password portion replaced by asterisks.
     """
     start_position = url.find(':', start) + 1
     end_position = url.find('@')
@@ -71,7 +102,9 @@ def hide_password(url, start=6):
         '*' * (end_position - start_position),
         url[end_position:])
 
-
+# -----------------------------------------------------------------------------
+# MAIN EXECUTION BLOCK
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
     parser = OptionParser(usage="%prog [options] plugin.zip")
     parser.add_option(
@@ -96,16 +129,15 @@ if __name__ == "__main__":
     if not options.port:
         options.port = PORT
     if not options.username:
-        # interactive mode
+        # Interactive mode to set username
         username = getpass.getuser()
         print("Please enter user name [%s] :" % username, end=' ')
-
         res = input()
         if res != "":
             options.username = res
         else:
             options.username = username
     if not options.password:
-        # interactive mode
+        # Interactive mode to set password
         options.password = getpass.getpass()
     main(options, args)

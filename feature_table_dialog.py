@@ -1,17 +1,41 @@
-import os
-import zipfile
-import tempfile
-import json
-import random
-from collections import defaultdict
-import copy
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+/***************************************************************************
+ Feature Table Dialog
+                              A QGIS Plugin Component
+                              -------------------------
+ Description:
+    This module implements the FeatureTableDialog for the JD Boundary Uploader plugin.
+    It extracts boundary shapefiles from a ZIP archive, creates a memory layer, and provides
+    an interactive interface for editing attributes (Client Name, Farm Name, Field Name, and Group).
+    It also supports grouping, merging (and undoing merge operations), and exporting the final 
+    shapefile along with metadata (in JSON) packaged in a ZIP file.
+    
+ Author: Frederic Landry (frlandry@gmail.com)
+ Date: 2025-02-15
+ License: GNU General Public License (GPL v2 or later)
+ ***************************************************************************/
+"""
 
+# Standard modules
+import copy
+import json
+import os
+import random
+import tempfile
+import zipfile
+from collections import defaultdict
+
+# PyQt modules
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QLabel, QPushButton, QFileDialog, QMessageBox, QLineEdit, QInputDialog, QAbstractItemView
 )
 from PyQt5.QtCore import Qt, QVariant
 from PyQt5.QtGui import QColor, QFont
+
+# QGIS modules
 from qgis.core import (
     QgsVectorLayer, QgsProject, QgsVectorFileWriter, QgsFeature, QgsFields, QgsField,
     QgsWkbTypes, QgsSymbol, QgsRendererCategory, QgsCategorizedSymbolRenderer,
@@ -19,7 +43,12 @@ from qgis.core import (
 )
 from qgis.utils import iface
 
-# Fonction pour forcer le zoom sur la couche de travail
+# -----------------------------------------------------------------------------
+# FUNCTION: zoomToWorkingLayer
+# -----------------------------------------------------------------------------
+# Description:
+#   Forces the map canvas to zoom to the extent of the provided layer.
+#   Transforms the layer's extent to the canvas CRS if necessary.
 def zoomToWorkingLayer(layer):
     crs_dest = iface.mapCanvas().mapSettings().destinationCrs()
     crs_src = layer.crs()
@@ -31,14 +60,22 @@ def zoomToWorkingLayer(layer):
     iface.mapCanvas().setExtent(extent)
     iface.mapCanvas().refresh()
 
-# Fonction de clonage de QgsFeature
+# -----------------------------------------------------------------------------
+# FUNCTION: clone_feature
+# -----------------------------------------------------------------------------
+# Description:
+#   Creates and returns a clone of the given QgsFeature.
 def clone_feature(feat):
     new_feat = QgsFeature(feat.fields())
     new_feat.setGeometry(feat.geometry())
     new_feat.setAttributes(feat.attributes())
     return new_feat
 
-# Fenêtre simplifiée pour la saisie des métadonnées
+# -----------------------------------------------------------------------------
+# CLASS: MetadataDialog
+# -----------------------------------------------------------------------------
+# Description:
+#   A simple dialog to capture metadata (Client and Farm) from the user.
 class MetadataDialog(QDialog):
     def __init__(self, default_client="", default_farm="", parent=None):
         super(MetadataDialog, self).__init__(parent)
@@ -56,24 +93,53 @@ class MetadataDialog(QDialog):
         self.nextButton = QPushButton("Next", self)
         self.nextButton.clicked.connect(self.validateAndAccept)
         layout.addWidget(self.nextButton)
+
+    # Method: validateAndAccept
+    # Description:
+    #   Checks that both Client and Farm fields are not empty before accepting.
     def validateAndAccept(self):
         if not self.clientEdit.text().strip() or not self.farmEdit.text().strip():
             QMessageBox.critical(self, "Error", "Client and Farm cannot be empty.")
         else:
             self.accept()
+
+    # Method: getValues
+    # Description:
+    #   Returns the text values from the Client and Farm fields.
     def getValues(self):
         return self.clientEdit.text(), self.farmEdit.text()
 
+# -----------------------------------------------------------------------------
+# CLASS: FeatureTableDialog
+# -----------------------------------------------------------------------------
+# Description:
+#   The main dialog interface for editing and processing shapefile attributes.
 class FeatureTableDialog(QDialog):
     def __init__(self, parent=None):
         super(FeatureTableDialog, self).__init__(parent)
         self.setWindowTitle("JD Boundary Uploader - Editing Panel")
         self.setMinimumWidth(300)
         self.layout = QVBoxLayout(self)
-        # Sauvegarde pour annuler la dernière fusion
+        # Backup for undoing the last merge
         self.lastMergeBackup = None
 
-        # --- Extraction du ZIP et création de la couche mémoire ---
+        # --- ZIP Extraction and Memory Layer Creation ---
+        self._extractZipAndCreateLayer()
+
+        # --- Setup Map Canvas Zoom ---
+        zoomToWorkingLayer(self.layer)
+
+        # --- Setup Editing Interface ---
+        self._setupEditingInterface()
+
+        # Load table data from the layer
+        self.loadTable()
+
+    # Method: _extractZipAndCreateLayer
+    # Description:
+    #   Prompts the user to select a ZIP file, extracts it, and creates a memory layer
+    #   with the required fields from the shapefile found in the ZIP.
+    def _extractZipAndCreateLayer(self):
         zip_input_path, _ = QFileDialog.getOpenFileName(self, "Select FADQ ZIP", "", "Zip Files (*.zip)")
         if not zip_input_path:
             QMessageBox.critical(self, "Error", "No ZIP file selected.")
@@ -101,7 +167,6 @@ class FeatureTableDialog(QDialog):
             self.close()
             return
 
-        # Création de la couche mémoire avec champs requis
         crs = "EPSG:4326"
         geom_type = QgsWkbTypes.displayString(orig_layer.wkbType())
         self.layer = QgsVectorLayer(f"{geom_type}?crs={crs}", "Working Layer", "memory")
@@ -110,7 +175,7 @@ class FeatureTableDialog(QDialog):
         fields.append(QgsField("CLIENT_NAME", QVariant.String))
         fields.append(QgsField("FARM_NAME", QVariant.String))
         fields.append(QgsField("FIELD_NAME", QVariant.String))
-        # POLYGONTYP est conservé dans la couche, mais ne sera pas affiché dans le widget
+        # POLYGONTYP is kept in the layer but not displayed in the widget
         fields.append(QgsField("POLYGONTYP", QVariant.LongLong))
         fields.append(QgsField("GROUPE", QVariant.String))
         prov.addAttributes(fields)
@@ -135,16 +200,12 @@ class FeatureTableDialog(QDialog):
         QgsProject.instance().addMapLayer(self.layer)
         self.setupLabels()
 
-        # Remplacer le zoom classique par le zoom transformé
-        zoomToWorkingLayer(self.layer)
-
-        # Debug : nombre d'entités chargées
-        num_feats = len(list(self.layer.getFeatures()))
-        print("Number of features loaded:", num_feats)
-        if num_feats == 0:
-            QMessageBox.warning(self, "Warning", "No features loaded from the ZIP.")
-
-        # --- Interface d'édition ---
+    # Method: _setupEditingInterface
+    # Description:
+    #   Sets up the editing interface, including global attribute editors, the attribute table,
+    #   and action buttons for saving, merging, and other operations.
+    def _setupEditingInterface(self):
+        # Global values layout
         global_layout = QHBoxLayout()
         global_layout.addWidget(QLabel("Global Client:"))
         self.globalClientEdit = QLineEdit()
@@ -157,30 +218,32 @@ class FeatureTableDialog(QDialog):
         global_layout.addWidget(self.btnApplyGlobal)
         self.layout.addLayout(global_layout)
 
+        # Button to update symbology
         self.btnUpdateSymb = QPushButton("Update Symbology")
         self.btnUpdateSymb.clicked.connect(self.updateSymbology)
         self.layout.addWidget(self.btnUpdateSymb)
 
+        # Instruction label
         instructions = QLabel(
             "Edit CLIENT_NAME, FARM_NAME, FIELD_NAME and specify GROUP for merging.\n"
-            "Click on column headers to sort. You can select multiple rows; selection is synchronized with the map.")
+            "Click on column headers to sort. You can select multiple rows; selection is synchronized with the map."
+        )
         self.layout.addWidget(instructions)
 
+        # Table for attribute editing
         self.table = QTableWidget()
-        # Afficher 4 colonnes (sans POLYGONTYP)
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["CLIENT_NAME", "FARM_NAME", "FIELD_NAME", "GROUPE"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        # Utiliser MultiSelection pour permettre la sélection multiple sans modificateurs
         self.table.setSelectionMode(QAbstractItemView.MultiSelection)
         self.layout.addWidget(self.table)
 
         self.table.itemSelectionChanged.connect(self.highlightFeature)
         self.layer.selectionChanged.connect(self.onMapSelectionChanged)
 
-        # Boutons d'action de base
+        # Basic action buttons layout
         btn_layout = QHBoxLayout()
         self.btnSave = QPushButton("Save Edits")
         self.btnSave.clicked.connect(self.saveEdits)
@@ -193,7 +256,7 @@ class FeatureTableDialog(QDialog):
         btn_layout.addWidget(self.btnTerminate)
         self.layout.addLayout(btn_layout)
 
-        # Boutons supplémentaires pour assigner un groupe et annuler la dernière fusion
+        # Extra buttons: assign group and undo merge
         extra_btn_layout = QHBoxLayout()
         self.btnAssignGroup = QPushButton("Assign Group")
         self.btnAssignGroup.clicked.connect(self.assignGroup)
@@ -203,14 +266,15 @@ class FeatureTableDialog(QDialog):
         extra_btn_layout.addWidget(self.btnUndoMerge)
         self.layout.addLayout(extra_btn_layout)
 
-        # Bouton pour lancer un nouveau processus (désactivé par défaut)
+        # New Process button (disabled by default)
         self.btnNewProcess = QPushButton("New Process")
         self.btnNewProcess.setEnabled(False)
         self.btnNewProcess.clicked.connect(self.newProcess)
         self.layout.addWidget(self.btnNewProcess)
 
-        self.loadTable()
-
+    # Method: setupLabels
+    # Description:
+    #   Configures label settings for the working layer and applies them.
     def setupLabels(self):
         from qgis.core import QgsVectorLayerSimpleLabeling, QgsPalLayerSettings, QgsTextFormat
         label_settings = QgsPalLayerSettings()
@@ -229,6 +293,9 @@ class FeatureTableDialog(QDialog):
         self.layer.triggerRepaint()
         iface.mapCanvas().refresh()
 
+    # Method: loadTable
+    # Description:
+    #   Loads the attributes from the working layer into the table widget.
     def loadTable(self):
         feats = list(self.layer.getFeatures())
         self.table.setRowCount(len(feats))
@@ -239,6 +306,9 @@ class FeatureTableDialog(QDialog):
             self.table.setItem(i, 2, QTableWidgetItem(feat.attribute("FIELD_NAME") or ""))
             self.table.setItem(i, 3, QTableWidgetItem(feat.attribute("GROUPE") or ""))
 
+    # Method: applyGlobalValues
+    # Description:
+    #   Applies global values to the CLIENT_NAME and FARM_NAME fields for selected rows.
     def applyGlobalValues(self):
         global_client = self.globalClientEdit.text()
         global_farm = self.globalFarmEdit.text()
@@ -252,6 +322,9 @@ class FeatureTableDialog(QDialog):
         self.saveEdits()
         self.setupLabels()
 
+    # Method: assignGroup
+    # Description:
+    #   Prompts the user for a group name and assigns it to the selected rows.
     def assignGroup(self):
         group_name, ok = QInputDialog.getText(self, "Assign Group", "Enter group name:")
         if not ok or not group_name:
@@ -265,6 +338,9 @@ class FeatureTableDialog(QDialog):
             self.table.item(row, 3).setText(group_name)
         self.saveEdits()
 
+    # Method: undoMerge
+    # Description:
+    #   Reverts the last merge operation by restoring the layer state from backup.
     def undoMerge(self):
         if self.lastMergeBackup:
             reply = QMessageBox.question(
@@ -285,6 +361,9 @@ class FeatureTableDialog(QDialog):
         else:
             QMessageBox.information(self, "Info", "No merge to undo.")
 
+    # Method: updateSymbology
+    # Description:
+    #   Updates the layer symbology based on the distinct FARM_NAME values.
     def updateSymbology(self):
         farms = set()
         for feat in self.layer.getFeatures():
@@ -312,6 +391,9 @@ class FeatureTableDialog(QDialog):
         else:
             QMessageBox.information(self, "Symbology", "No FARM_NAME provided for symbology update.")
 
+    # Method: highlightFeature
+    # Description:
+    #   Highlights the feature corresponding to the first selected row in the table.
     def highlightFeature(self):
         self.table.blockSignals(True)
         selected = self.table.selectionModel().selectedRows()
@@ -326,6 +408,9 @@ class FeatureTableDialog(QDialog):
         iface.mapCanvas().zoomToSelected(self.layer)
         self.table.blockSignals(False)
 
+    # Method: onMapSelectionChanged
+    # Description:
+    #   Synchronizes the selection in the table with the layer selection.
     def onMapSelectionChanged(self, selected, deselected, clearAndSelect):
         self.table.blockSignals(True)
         self.table.clearSelection()
@@ -334,6 +419,9 @@ class FeatureTableDialog(QDialog):
                 self.table.selectRow(i)
         self.table.blockSignals(False)
 
+    # Method: saveEdits
+    # Description:
+    #   Saves changes made in the table back to the layer's attributes.
     def saveEdits(self):
         self.layer.startEditing()
         feats = list(self.layer.getFeatures())
@@ -348,12 +436,20 @@ class FeatureTableDialog(QDialog):
                     break
         self.layer.commitChanges()
 
+    # Method: clone_feature (class version)
+    # Description:
+    #   Clones a given feature. Note: A global clone_feature function exists.
     def clone_feature(feat):
         new_feat = QgsFeature(feat.fields())
         new_feat.setGeometry(feat.geometry())
         new_feat.setAttributes(feat.attributes())
         return new_feat
 
+    # Method: mergeGroups
+    # Description:
+    #   Merges features with the same GROUP attribute. The new feature's FIELD_NAME
+    #   is the concatenation of the original FIELD_NAME values, POLYGONTYP is recalculated,
+    #   and the GROUP attribute is preserved.
     def mergeGroups(self):
         self.saveEdits()
         self.lastMergeBackup = [clone_feature(feat) for feat in self.layer.getFeatures()]
@@ -391,6 +487,9 @@ class FeatureTableDialog(QDialog):
         QMessageBox.information(self, "Info", "Groups merged.")
         self.refreshTable()
 
+    # Method: clearGroupBeforeTerminate
+    # Description:
+    #   Clears the GROUP attribute for all features in the layer.
     def clearGroupBeforeTerminate(self):
         self.layer.startEditing()
         for feat in self.layer.getFeatures():
@@ -398,6 +497,10 @@ class FeatureTableDialog(QDialog):
             self.layer.updateFeature(feat)
         self.layer.commitChanges()
 
+    # Method: terminateAndClearGroup
+    # Description:
+    #   Exports the layer, renames it based on the exported shapefile, updates labels,
+    #   and enables the New Process button.
     def terminateAndClearGroup(self):
         self.clearGroupBeforeTerminate()
         self.exportData()
@@ -408,6 +511,10 @@ class FeatureTableDialog(QDialog):
             QMessageBox.information(self, "Info", f"Working layer renamed to {new_name}.")
         self.btnNewProcess.setEnabled(True)
 
+    # Method: exportData
+    # Description:
+    #   Exports the working layer to a shapefile, creates a metadata JSON file,
+    #   and packages them into a ZIP archive.
     def exportData(self):
         shp_output_path, _ = QFileDialog.getSaveFileName(self, "Save final shapefile", "", "Shapefile (*.shp)")
         if not shp_output_path:
@@ -465,6 +572,9 @@ class FeatureTableDialog(QDialog):
                 zipf.write(json_filename, arcname=os.path.basename(json_filename))
         QMessageBox.information(self, "Success", f"ZIP archive created at:\n{zip_output_path}")
 
+    # Method: resetInterface
+    # Description:
+    #   Resets the interface by clearing global fields, refreshing the table, and updating the map canvas.
     def resetInterface(self):
         self.globalClientEdit.clear()
         self.globalFarmEdit.clear()
@@ -473,10 +583,16 @@ class FeatureTableDialog(QDialog):
         iface.mapCanvas().setExtent(self.layer.extent())
         iface.mapCanvas().refresh()
 
+    # Method: refreshTable
+    # Description:
+    #   Clears and reloads the table data from the working layer.
     def refreshTable(self):
         self.table.setRowCount(0)
         self.loadTable()
 
+    # Method: newProcess
+    # Description:
+    #   Removes the current working layer and starts a new process by loading a new ZIP file.
     def newProcess(self):
         reply = QMessageBox.question(
             self,
@@ -550,6 +666,6 @@ class FeatureTableDialog(QDialog):
 
 if __name__ == '__main__':
     dialog = FeatureTableDialog()
-    result = dialog.exec_()  # Mode modal
+    result = dialog.exec_()  # Modal mode
     if result == QDialog.Accepted:
         print("Dialog closed with acceptance.")
