@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/jd_boundary_uploader" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
